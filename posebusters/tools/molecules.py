@@ -108,7 +108,10 @@ def add_stereo_hydrogens(mol: Mol) -> Mol:
 
 def assert_sanity(mol: Mol) -> Mol:
     """Check that RDKit sanitization does not fail."""
-    flags = SanitizeMol(mol)
+    try:
+        flags = SanitizeMol(mol)
+    except Exception:
+        flags = -1
     assert flags == 0, f"Sanitization failed with flags {flags}"
     return mol
 
