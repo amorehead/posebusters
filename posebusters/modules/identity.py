@@ -40,8 +40,16 @@ def check_identity(mol_pred: Mol, mol_true: Mol, inchi_options: str = "") -> dic
         PoseBusters results dictionary.
     """
     # generate inchis
-    inchi_crystal = standardize_and_get_inchi(mol_true, options=inchi_options)
-    inchi_docked = standardize_and_get_inchi(mol_pred, options=inchi_options)
+    try:
+        inchi_crystal = standardize_and_get_inchi(mol_true, options=inchi_options)
+    except Exception as e:
+        logger.error(f"Failed to generate InChI for crystal ligand due to: {e}")
+        inchi_crystal = ""
+    try:
+        inchi_docked = standardize_and_get_inchi(mol_pred, options=inchi_options)
+    except Exception as e:
+        logger.error(f"Failed to generate InChI for docked ligand due to: {e}")
+        inchi_docked = ""
 
     # check inchis are valid
     inchi_crystal_valid = _is_valid_inchi(inchi_crystal)
