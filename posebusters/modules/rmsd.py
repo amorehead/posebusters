@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import timeout_decorator
 from copy import deepcopy
 
 import numpy as np
@@ -10,6 +11,7 @@ from rdkit.Chem.rdchem import Mol
 from rdkit.Chem.rdMolAlign import CalcRMS, GetBestRMS
 from rdkit.Chem.rdmolops import RemoveHs, RemoveStereochemistry
 from rdkit.rdBase import LogToPythonLogger
+from timeout_decorator import TimeoutError as TimeoutDecoratorError
 
 from ..tools.logging import CaptureLogger
 from ..tools.molecules import neutralize_atoms, remove_all_charges_and_hydrogens
@@ -23,6 +25,8 @@ tautomer_enumerator.SetMaxTransforms(100000)
 tautomer_enumerator.SetReassignStereo(True)
 tautomer_enumerator.SetRemoveBondStereo(True)
 tautomer_enumerator.SetRemoveSp3Stereo(True)
+
+RMSD_TIMEOUT_IN_SECONDS = 30
 
 
 def check_rmsd(
@@ -98,8 +102,12 @@ def robust_rmsd(  # noqa: PLR0913
         RemoveStereochemistry(mol_ref)
 
     if heavy_only:
-        mol_probe = RemoveHs(mol_probe)
-        mol_ref = RemoveHs(mol_ref)
+        try:
+            mol_probe = RemoveHs(mol_probe)
+            mol_ref = RemoveHs(mol_ref)
+        except Exception as e:
+            logger.warning(f"Failed to remove hydrogens due to: {e}. RMSD cannot be calculated.")
+            return np.nan
 
     # combine parameters
     params = dict(symmetrizeConjugatedTerminalGroups=symmetrizeConjugatedTerminalGroups, kabsch=kabsch, **params)
@@ -150,10 +158,13 @@ def _call_rdkit_rmsd(mol_probe: Mol, mol_ref: Mol, conf_id_probe: int, conf_id_r
         pass
     except ValueError:
         pass
+    except TimeoutDecoratorError:
+        pass
 
     return np.nan
 
 
+@timeout_decorator.timeout(RMSD_TIMEOUT_IN_SECONDS, use_signals=False)
 def _rmsd(mol_probe: Mol, mol_ref: Mol, conf_id_probe: int, conf_id_ref: int, kabsch: bool = False, **params):
     if kabsch is True:
         return GetBestRMS(prbMol=mol_probe, refMol=mol_ref, prbId=conf_id_probe, refId=conf_id_ref, **params)
@@ -165,8 +176,12 @@ def intercentroid(
 ) -> float:
     """Distance between centroids of two molecules."""
     if heavy_only:
-        mol_probe = RemoveHs(mol_probe)
-        mol_ref = RemoveHs(mol_ref)
+        try:
+            mol_probe = RemoveHs(mol_probe)
+            mol_ref = RemoveHs(mol_ref)
+        except Exception as e:
+            logger.warning(f"Failed to remove hydrogens due to: {e}. Centroid RMSD cannot be calculated.")
+            return np.nan
 
     centroid_probe = mol_probe.GetConformer(conf_id_probe).GetPositions().mean(axis=0)
     centroid_ref = mol_ref.GetConformer(conf_id_ref).GetPositions().mean(axis=0)
