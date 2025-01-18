@@ -1,4 +1,5 @@
 """Module to check RMSD between docked and crystal ligand."""
+
 from __future__ import annotations
 
 import logging
@@ -6,6 +7,7 @@ import timeout_decorator
 from copy import deepcopy
 
 import numpy as np
+from rdkit.Chem.AllChem import AssignBondOrdersFromTemplate
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 from rdkit.Chem.rdMolAlign import CalcRMS, GetBestRMS
@@ -117,27 +119,41 @@ def robust_rmsd(  # noqa: PLR0913
     if not np.isnan(rmsd):
         return rmsd
 
+    # try again ignoring charges or tautomers
+    rmsd = _rmsd_ignoring_charges_and_tautomers(mol_ref, mol_probe, conf_id_ref, conf_id_probe, params)
+    if not np.isnan(rmsd):
+        return rmsd
+
+    # try assigning the bond orders of one molecule to the other
+    mol_probe_new_bonds = AssignBondOrdersFromTemplate(mol_ref, mol_probe)
+    rmsd = _call_rdkit_rmsd(mol_probe_new_bonds, mol_ref, conf_id_probe, conf_id_ref, **params)
+    if not np.isnan(rmsd):
+        return rmsd
+
+    return np.nan
+
+
+def _rmsd_ignoring_charges_and_tautomers(
+    mol_ref: Mol, mol_probe: Mol, conf_id_ref: int, conf_id_probe: int, params: dict
+) -> float:
     # try again but remove charges and hydrogens
     mol_ref_uncharged = remove_all_charges_and_hydrogens(mol_ref)
     mol_probe_uncharged = remove_all_charges_and_hydrogens(mol_probe)
     rmsd = _call_rdkit_rmsd(mol_probe_uncharged, mol_ref_uncharged, conf_id_probe, conf_id_ref, **params)
     if not np.isnan(rmsd):
         return rmsd
-
     # try again but neutralize atoms
     mol_ref_neutralized = neutralize_atoms(mol_ref)
     mol_probe_neutralized = neutralize_atoms(mol_probe)
     rmsd = _call_rdkit_rmsd(mol_probe_neutralized, mol_ref_neutralized, conf_id_probe, conf_id_ref, **params)
     if not np.isnan(rmsd):
         return rmsd
-
     # try again but on canonical tautomers
     mol_ref_canonical = tautomer_enumerator.Canonicalize(mol_ref)
     mol_probe_canonical = tautomer_enumerator.Canonicalize(mol_probe)
     rmsd = _call_rdkit_rmsd(mol_probe_canonical, mol_ref_canonical, conf_id_probe, conf_id_ref, **params)
     if not np.isnan(rmsd):
         return rmsd
-
     # try again but after neutralizing atoms
     mol_ref_neutral_canonical = tautomer_enumerator.Canonicalize(neutralize_atoms(mol_ref))
     mol_probe_neutral_canonical = tautomer_enumerator.Canonicalize(neutralize_atoms(mol_probe))
@@ -147,7 +163,7 @@ def robust_rmsd(  # noqa: PLR0913
     if not np.isnan(rmsd):
         return rmsd
 
-    return np.nan
+    return rmsd
 
 
 def _call_rdkit_rmsd(mol_probe: Mol, mol_ref: Mol, conf_id_probe: int, conf_id_ref: int, **params):
